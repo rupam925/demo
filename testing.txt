@@ -1,0 +1,488 @@
+diff --git a/Auto_labelling/NLPTricks.py b/Auto_labelling/NLPTricks.py
+index 2be6096..ebaa400 100644
+--- a/Auto_labelling/NLPTricks.py
++++ b/Auto_labelling/NLPTricks.py
+@@ -6,11 +6,10 @@ Created on Tue Sep 29 11:53:56 2020
+ """
+ 
+ import pandas as pd
++import numpy as np
+ 
+ 
+ 
+-ui_issue_corpus = pd.read_excel("AutoLabelingCorpus.xlsx", sheet_name="Ui Issue")
+-ui_issue_corpus = ui_issue_corpus["UI"].to_list()
+ 
+ class NLPMethod():
+     
+@@ -19,32 +18,101 @@ class NLPMethod():
+     
+     def checkNLPKeywords(self, error_message):
+         
++        ui_issue_corpus = pd.read_excel("AutoLabelingCorpus.xlsx", sheet_name="Ui Issue")
++        ui_issue_corpus = ui_issue_corpus["UI"].to_list()
++        ui_token_length = len(ui_issue_corpus)
++        
++        negative_token_corpus = pd.read_excel("AutoLabelingCorpus.xlsx", sheet_name="Negative words")
++        negative_token_corpus = negative_token_corpus["negative"].to_list()
++        
+         nlp_count = 0
+         error_intent = []
+         confidence_score = []
++        specific_label = []
+         
+         for i in range(len(error_message)):
+             error_keywords = error_message[i].lower().split(" ")
+-            ui_keys = set(ui_issue_corpus).intersection(set(error_keywords))
++            ui_keys = list(set(ui_issue_corpus).intersection(set(error_keywords)))
++            
++            neg_keys = list(set(negative_token_corpus).intersection(set(error_keywords)))
+             
+             if len(ui_keys) >0:
+-                if len(ui_keys) >= 3:
+-                    ui_keys = list(ui_keys)[0:2]
++                score = np.round((len(ui_keys) / ui_token_length)*4,2) 
++                ui_keys = ui_keys[0:1]
+                     
+-                ei = " ".join(ui_keys) + " issue"
++                if ("click" in ui_keys) or ("button" in ui_keys) or ("menu" in ui_keys):
++                    if len(neg_keys)>0:
++                        ei = "Button Action" + " ".join(neg_keys)
++                    else:
++                        ei = "Button Action Issue"
++                elif ("display" in ui_keys) or ("screen" in ui_keys) or ("UI" in ui_keys) or ("displayed" in ui_keys) or ("view" in ui_keys):
++                    ei = "Screen Validation Issue"
++                elif ("job" in error_keywords):
++                    ei = "job failed"
++                elif ("account" in error_keywords):
++                    ei = "Account Not Present"
++                else:
++                    ei = " ".join(ui_keys) + " Validation Error"
++                
+                 error_intent.append(ei)
+-                confidence_score.append(0.80)
++                confidence_score.append(score)
++                ui_keys = " ".join(ui_keys)
++                specific_label.append(ui_keys + "Issue")
+                 nlp_count += 1
+             else:
+                 error_intent.append("None")
+-                confidence_score.append(0)
++                specific_label.append("None")
++                confidence_score.append(float(0))
+         
+                 
+         predicted_errors = {
+             "NLP-error-intent" : error_intent,
+             "NLP-confidence-score" : confidence_score,
++            "NLP-Specific-label" : specific_label
+             }
+         
+         print("Predicted NLP Method : ", nlp_count)
+         return pd.DataFrame(predicted_errors)
++    
++    def corpusFunctionality(self, error_message):
++        
++        corpus = pd.read_excel("AutoLabelingCorpus.xlsx", sheet_name="Ui Issue")
++        screen = corpus["display"].to_list()
++        action = corpus["action"].to_list()
++        element = corpus["element"].to_list()
++        other = corpus["other"].to_list()
++        
++        error_intent = []
++        confidence_score = []
++        specific_label = []
++        flag = 1
++        
++        for i in range(len(error_message)):
++            error_keywords = error_message[i].lower().split(" ")
++            
++            for keys, label in zip([screen, action, element, other], ["screen", "action", "element", "other"]):
++                matched_keys = list(set(keys).intersection(set(error_keywords)))
++                
++                if len(matched_keys) > 0:
++                    flag = 0
++                    specific_label.append(label)
++                    ei = " ".join(matched_keys) + "error"
++                    error_intent.append(ei)
++                    confidence_score.append(1.0)
++                    break
++            
++            if flag == 1:
++                specific_label.append("None")
++                error_intent.append("None")
++                confidence_score.append(0.0)
++            
++        predicted_errors = {
++            "NLP-error-intent" : error_intent,
++            "NLP-confidence-score" : confidence_score,
++            "NLP-Specific-label" : specific_label
++            }
++        
++        
++        return pd.DataFrame(predicted_errors)
++        
+     
+\ No newline at end of file
+diff --git a/Auto_labelling/ReaderFunction.py b/Auto_labelling/ReaderFunction.py
+index c9b643f..eeec2e7 100644
+--- a/Auto_labelling/ReaderFunction.py
++++ b/Auto_labelling/ReaderFunction.py
+@@ -35,7 +35,7 @@ class readInputFiles():
+             failed_data['message_value'] = failed_data['message'].apply(lambda value :value.split('|')[-1] if '|' in value else value.split(':',1)[1] if ':' in value else value.split('-',1)[1] if '-' in value else value)
+             failed_data['message_value'] = failed_data['message_value'].apply(lambda value :' '.join(value.split()[:])) 
+             
+-            failed_data['test_case_target'] = failed_data['test_case_title'].apply(lambda value :value.split(':',1)[0] if ':' in value else value.split('-',1)[0] if '-' in value else '')
++            failed_data['test_case_target'] = failed_data['message_value'].apply(lambda value :value.split(':',1)[0] if ':' in value else value.split('-',1)[0] if '-' in value else '')
+             failed_data['test_description'] = failed_data['test_case_title'].apply(lambda value :value.split(':',1)[-1] if ':' in value else value.split('-',1)[-1] if '-' in value else value.split(' ',1)[1] if len(value.split(' ',1))>1 else value.split(' ',1)[0])
+             
+             failed_data['technical'] = failed_data['stack_trace'].apply(lambda value : value.split(':')[0].split('.')[-1])
+@@ -63,6 +63,10 @@ class readInputFiles():
+             failed_data['technical'] = failed_data['technical'].apply(lambda x: x[0] if x else '')
+             failed_data['technical'] = failed_data['Error_Message'].apply(lambda value :value.split(':')[1] if ':' in value  else '')
+             failed_data['technical'] = failed_data['technical'].apply(lambda value :value.replace('Error Message','') if 'Error Message' in value  else value)
++            failed_data['message_value'] = failed_data['message'].apply(lambda value :value.split('|')[-1] if '|' in value else value.split(':',1)[1] if ':' in value else value.split('-',1)[1] if '-' in value else value)
++            failed_data['message_value'] = failed_data['message_value'].apply(lambda value :' '.join(value.split()[:])) 
++            
++            failed_data['test_case_target'] = failed_data['message_value'].apply(lambda value :value.split(':',1)[0] if ':' in value else value.split('-',1)[0] if '-' in value else '')
+             
+             failed_data.reset_index(inplace=True)
+             
+diff --git a/Auto_labelling/main-API.py b/Auto_labelling/main-API.py
+index 6c2391e..057d284 100644
+--- a/Auto_labelling/main-API.py
++++ b/Auto_labelling/main-API.py
+@@ -40,43 +40,52 @@ class predictErrors(Resource):
+         rf = ReaderFunction.readInputFiles()
+         if (project_type == "irecon") | (project_type == "atp") | (project_type == "caffemac"):
+             error_dataset = rf.readIreconFiles(input_filepath)
++            error_message = error_dataset["test_case_title"] + error_dataset["general_message"] + error_dataset["test_description"]
++        
+         elif project_type == "webservice":
+             error_dataset = rf.readWebserviceFiles(input_file)
++            error_message = error_dataset["TestCase_Name"] + error_dataset["general_message"] + error_dataset["ServiceName"]
++        
++        elif project_type == "new_internet_data":
++            error_dataset = rf.readWebserviceFiles(input_file)
++            error_message = error_dataset["technical"] + error_dataset["general_message"]
++            
+         else:
+             return jsonify(status="not found", message='file type not found to read the input file')
+         
+         
+         if len(error_dataset) == 0:
+-            return jsonify(status="successful", message='data praserd and found all testcase are NOT FAILED.')
++            return jsonify(status="successful", message='data praserd and found all testcase are Passed.')
+         
+         #error_dataset = pd.read_csv(input_filepath)
+         
+         # cheching for the column name "error_message" in given data. 
+         # if its present than only we going for prediction  of error intents
+          
+-        elif "message" in error_dataset.columns:
+-            error_message = error_dataset["test_case_title"] + error_dataset["general_message"] + error_dataset["test_description"]
+-          
+-            # statistical classification model calling and passing the error messages
+-            cm = classificationModels.errorClassificationModels()
+-            predicted_data = cm.predictErrorIntents(error_message)
++        
++        # statistical classification model calling and passing the error messages
++        cm = classificationModels.errorClassificationModels()
++        predicted_data = cm.predictErrorIntents(error_message)
+             
+-            predicted_data = pd.concat([error_dataset, predicted_data], axis=1) #concating the given data with model data
+-            predicted_data.drop(columns=["error-message"], inplace=True)  # dropping the duplicate column
++        predicted_data = pd.concat([error_dataset, predicted_data], axis=1) #concating the given data with model data
++        predicted_data.drop(columns=["error-message"], inplace=True)  # dropping the duplicate column
+             
+-            filename = "debugReference-" + filename.replace(".json",".csv").replace(".JSON",".csv")
+-            output_filepath = os.path.join("predictedOutputs", filename)
+-            predicted_data.to_csv(output_filepath, index=False)
++        filename = "debugReference-" + filename.replace(".json",".csv").replace(".JSON",".csv").replace(".xls",".csv").replace(".XLS",".csv")
++        output_filepath = os.path.join("predictedOutputs", filename)
++        predicted_data.to_csv(output_filepath, index=False)
+             
++        if (project_type == "irecon") | (project_type == "atp") | (project_type == "caffemac"):
+             custom_data = predicted_data[["test_case_title", "test_case_id", "execution_exceptions","error-intent", "confidence-score","model"]]
+-            filename = filename.replace("debugReference-", "predicted-")
+-            custom_data.to_csv(os.path.join("predictedOutputs", filename), index=False)
++        elif project_type == "webservice":
++            custom_data = predicted_data[["TestCase_Name", "TestCase_Name", "Error_Message", "error-intent", "confidence-score","model"]]
++        elif project_type == "new_internet_data":
++            custom_data = predicted_data
++            
++        filename = filename.replace("debugReference-", "predicted-")
++        custom_data.to_csv(os.path.join("predictedOutputs", filename), index=False)
+             
+-            return send_from_directory("predictedOutputs", filename, as_attachment=True)
++        return send_from_directory("predictedOutputs", filename, as_attachment=True)
+         
+-        # sending response for not finding the column name "error_message"
+-        else:
+-            return jsonify(status="unsuccessful", message='not found error_message column in given data. please check spelling mismatch also')
+         
+         
+ class trainModels(Resource):
+diff --git a/DevNXT/WorkInProgress/Code_health_merge.py b/DevNXT/WorkInProgress/Code_health_merge.py
+index a15b197..f78c391 100644
+--- a/DevNXT/WorkInProgress/Code_health_merge.py
++++ b/DevNXT/WorkInProgress/Code_health_merge.py
+@@ -120,17 +120,43 @@ code_smell['excessive_return']=code_smell['File'].apply(lambda x : return_dict.g
+ code_smell['nested']=code_smell['File'].apply(lambda x : nest_dict.get(x) if x in nest_dict.keys() else 0)
+ code_smell['import']=code_smell['File'].apply(lambda x : import_dict.get(x) if x in import_dict.keys() else 0)
+ code_smell['exception']=code_smell['File'].apply(lambda x : excep_dict.get(x) if x in excep_dict.keys() else 0)
++code_smell['max_Passing_param']=code_smell['passing_param'].apply(lambda x : max(x) if type(x)==list else 1)
+ 
+ 
+ 
+ code_health_data.to_csv(os.path.join('Code_Health','merged_code_health.csv'))
+ summary=pd.read_csv('summary_output.csv',index_col=0)
+ summary['filename']=summary['filename'].apply(lambda x : x.split('CodeForensics-BetaVersion\\')[-1])
+-summary.drop_duplicates(inplace=True)a
+-sum_file=list(set(summary['filename']))
++summary.drop_duplicates(inplace=True)
++sum_file=list(set(code_smell['File']))
++summary_df=pd.DataFrame()
+ k=0 
+ while k!=len(sum_file):
+     sum_df=summary.loc[summary['filename']==sum_file[k]]
++    det_text=sum_df['Details']
++    tempdf=code_smell.loc[code_smell['File']==sum_file[k]]
++    tempdf.reset_index(drop=True,inplace=True)
++    t=0 
++    while t!=len(tempdf):
++        tempdf['excessive_return']=tempdf['excessive_return'].apply(lambda x:x[0] if type(x)==list else 1)
++        if int(tempdf['excessive_return'][t])>10:
++            det_text=det_text+''+'Excessive return Parameter'
++        if tempdf['nested'][t]>20:
++            det_text=det_text+''+'Code is more nested'
++        if tempdf['import'][t]>40:
++            det_text=det_text+''+'Excessive import'
++        if tempdf['exception'][t]<5:
++            det_text=det_text+''+'Poor Exception handling'
++        if tempdf['max_Passing_param'][t]>10:
++            det_text=det_text+''+'Excessive passing Parameter'
++        sum_df['Details']=det_text
++        summary_df=summary_df.append(sum_df)
++        t=t+1
++    k=k+1
++summary_df.reset_index(drop=True,inplace=True)
++summary_df.to_csv('Summary_Data_output.csv')
++    
++        
+     
+     
+     
+diff --git a/DevNXT/WorkInProgress/PlotGraph.py b/DevNXT/WorkInProgress/PlotGraph.py
+index 1f1beda..0bcd29a 100644
+--- a/DevNXT/WorkInProgress/PlotGraph.py
++++ b/DevNXT/WorkInProgress/PlotGraph.py
+@@ -149,11 +149,11 @@ class churn():
+         author_churn['n-revs']=author_churn['author'].apply(lambda x : dictionary.get(x))
+         author_churn['added']=author_churn['author'].apply(lambda x : lineadded_dictionary.get(x) if x in lineadded_dictionary.keys() else 0)
+         author_churn['deleted']=author_churn['author'].apply(lambda x : linedel_dictionary.get(x) if x in linedel_dictionary.keys() else 0)
+-        author_churn['today addition']=author_churn['author'].apply(lambda x : today_dict.get(x) if x in today_dict.keys() else 'N/A')
+-        author_churn['previous addition']=author_churn['author'].apply(lambda x : prev_dict.get(x) if x in prev_dict.keys() else 'N/A') 
++        author_churn['today addition']=author_churn['author'].apply(lambda x : today_dict.get(x) if x in today_dict.keys() else 0)
++        author_churn['previous addition']=author_churn['author'].apply(lambda x : prev_dict.get(x) if x in prev_dict.keys() else 0) 
+         
+-        author_churn['today deletion']=author_churn['author'].apply(lambda x : today_del.get(x) if x in today_del.keys() else 'N/A')
+-        author_churn['previous deletion']=author_churn['author'].apply(lambda x : prev_del.get(x) if x in prev_del.keys() else 'N/A') 
++        author_churn['today deletion']=author_churn['author'].apply(lambda x : today_del.get(x) if x in today_del.keys() else 0)
++        author_churn['previous deletion']=author_churn['author'].apply(lambda x : prev_del.get(x) if x in prev_del.keys() else 0) 
+         dataflag = checkDataHealth(author_churn)
+ 
+         if dataflag == 0:
+@@ -792,16 +792,20 @@ class codeHealth():
+         comment_stats = pd.read_csv(os.path.join('multimetric_output_folder',"multimetric-log.csv"),index_col=0)
+         comment_stats.drop_duplicates(inplace=True)
+         comment_stats.reset_index(drop=True,inplace=True)
+-        Code_health=pd.DataFrame(columns=['filename','comment_ratio','tiobe_duplication','loggenerated_datetime','project_name'])
++        Code_health=pd.DataFrame(columns=['filename','comment_ratio','LOC','tiobe_duplication','loggenerated_datetime','project_name'])
+ 
+         Code_health['filename']=comment_stats['filename']
+-        Code_health["files"] = Code_health["filename"].apply(lambda x: x.split("\\")[-1])
++        Code_health['LOC']=comment_stats['loc']
++        Code_health["filename"] = Code_health["filename"].apply(lambda x: x.split("CodeForensics-BetaVersion/")[-1])
++        Code_health["filename"]=Code_health["filename"].apply(lambda x : x.replace('/','\\'))
+         Code_health['comment_ratio']=comment_stats['comment_ratio']
++        
+         Code_health['tiobe_duplication']=comment_stats['tiobe_duplication']
+         Code_health['loggenerated_datetime']=comment_stats['loggenerated_datetime']
+         Code_health['project_name']=comment_stats['project_name']
+-        Code_health.drop('filename',axis=1,inplace=True)
+-        Code_health_data=duplication_stats_data.merge(Code_health,on=['files'],how='left')
++        #Code_health.drop('filename',axis=1,inplace=True)
++        Code_health_data=duplication_stats_data.merge(Code_health,on=['filename'],how='inner')
++        Code_health_data = Code_health_data[Code_health_data["duplication_percentage"] > 50]
+         Code_health_data.reset_index(drop=True,inplace=True)
+         Code_health_data.to_csv(os.path.join('Code_Health','Code_health.csv'))
+         dataflag = checkDataHealth(duplication_stats)
+@@ -860,15 +864,15 @@ class codeHealth():
+         print("\t|___. generating function details")
+         #logdata = selectTodayData(collection_name="mcabe_halstead", logdate=self.logdate, project_name=self.project_name)
+         #comments_data = pd.DataFrame(logdata)
+-        fun_details = pd.read_csv(os.path.join('Code_details',"details.csv"))
++        fun_details = pd.read_csv(os.path.join('Code_details',"details.csv"),index_col=0)
+         
+         dataflag = checkDataHealth(fun_details)
+ 
+         if dataflag == 0:
+             try:
+                 fun_details['count']=fun_details['count'].fillna(0)
+-                fun_details["file_type"] = fun_details["program_name"].apply(lambda x: x.split(".")[-1])
+-                fun_details["files"] = fun_details["program_name"].apply(lambda x: x.split("/")[-1]) # getting the files names
++                fun_details["file_type"] = fun_details["file_name"].apply(lambda x: x.split(".")[-1])
++                fun_details["files"] = fun_details["file_name"].apply(lambda x: x.split("/")[-1]) # getting the files names
+                 fun_details = fun_details[fun_details["file_type"].isin(['py','js','ejs'])]
+                 fun_details['Function name']=fun_details['Function name'].fillna('Class')
+                 fun_details['param']=fun_details['Function name'].apply(lambda x: x.split(',',1)[-1] if ',' in x else x)
+diff --git a/Webinar Bot/OCR /.gitkeep b/Webinar Bot/OCR /.gitkeep
+new file mode 100644
+index 0000000..e69de29
+diff --git a/Webinar Bot/OCR /testtesseract.py b/Webinar Bot/OCR /testtesseract.py
+new file mode 100644
+index 0000000..7ffaaae
+--- /dev/null
++++ b/Webinar Bot/OCR /testtesseract.py	
+@@ -0,0 +1,123 @@
++# -*- coding: utf-8 -*-
++"""
++Created on Tue Oct  6 11:41:40 2020
++
++@author: hp
++"""
++
++import pytesseract
++from PIL import Image
++import cv2
++import numpy as np
++from selenium import webdriver
++import os
++import time
++
++'''
++file_path= "receipt.png"
++im = Image.open(file_path)
++im.save("receipt.png", dpi=(300, 300))
++
++image = cv2.imread("receipt.png")
++image = cv2.resize(image, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
++retval, threshold = cv2.threshold(image,127,255,cv2.THRESH_BINARY)
++
++
++#tesseract_cmd= r'F:\\\Wipro\\\Webinar bot\\\gnana\\\tesseract.exe'
++pytesseract.pytesseract.tesseract_cmd= r'F:\\Wipro\\Webinar bot\\TesseractOCR\\tesseract.exe'
++#pytesseract.pytesseract.tessdata_prefix=r'F:\\\Wipro\\\Webinar bot\\\gnana\\\tessdata'
++#config = ('-l eng --oem 1 --psm 3')
++#print(pytesseract.image_to_string(threshold,config =config))
++
++text = pytesseract.image_to_string(threshold)
++
++'''
++    
++
++def fullpage_screenshot(driver, file):
++
++        print("Starting chrome full page screenshot workaround ...")
++
++        total_width = driver.execute_script("return document.body.offsetWidth")
++        total_height = driver.execute_script("return document.body.parentNode.scrollHeight")
++        viewport_width = driver.execute_script("return document.body.clientWidth")
++        viewport_height = driver.execute_script("return window.innerHeight")
++        print("Total: ({0}, {1}), Viewport: ({2},{3})".format(total_width, total_height,viewport_width,viewport_height))
++        rectangles = []
++
++        i = 0
++        while i < total_height:
++            ii = 0
++            top_height = i + viewport_height
++
++            if top_height > total_height:
++                top_height = total_height
++
++            while ii < total_width:
++                top_width = ii + viewport_width
++
++                if top_width > total_width:
++                    top_width = total_width
++
++                print("Appending rectangle ({0},{1},{2},{3})".format(ii, i, top_width, top_height))
++                rectangles.append((ii, i, top_width,top_height))
++
++                ii = ii + viewport_width
++
++            i = i + viewport_height
++
++        stitched_image = Image.new('RGB', (total_width, total_height))
++        previous = None
++        part = 0
++
++        for rectangle in rectangles:
++            if not previous is None:
++                driver.execute_script("window.scrollTo({0}, {1})".format(rectangle[0], rectangle[1]))
++                print("Scrolled To ({0},{1})".format(rectangle[0], rectangle[1]))
++                time.sleep(0.2)
++
++            file_name = "part_{0}.png".format(part)
++            print("Capturing {0} ...".format(file_name))
++
++            driver.get_screenshot_as_file(file_name)
++            screenshot = Image.open(file_name)
++
++            if rectangle[1] + viewport_height > total_height:
++                offset = (rectangle[0], total_height - viewport_height)
++            else:
++                offset = (rectangle[0], rectangle[1])
++
++            print("Adding to stitched image with offset ({0}, {1})".format(offset[0],offset[1]))
++            stitched_image.paste(screenshot, offset)
++
++            #del screenshot
++            os.remove(file_name)
++            part = part + 1
++            previous = rectangle
++
++        stitched_image.save(file)
++        print("Finishing chrome full page screenshot workaround...")
++        return True
++
++
++
++driver = webdriver.Chrome("C:\\webdrivers\\chromedriver.exe")
++u="https://www.infosys.com/newsroom/events/2020/future-education.html"
++driver.get(u)
++fullpage_screenshot(driver,"Infosys.jpg")
++File_Name="Infosys.txt"
++file=open(File_Name,"w+")
++imPath="Infosys.jpg"
++img_cv = cv2.imread(imPath)
++img_rgb = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
++pytesseract.pytesseract.tesseract_cmd= r'F:\\Wipro\\Webinar bot\\TesseractOCR\\tesseract.exe'
++#pytesseract.pytesseract.tessdata_prefix=r'D:\Tesseract-OCR\tessdata'
++#print(pytesseract.image_to_string(img_rgb))
++im = cv2.imread(imPath, cv2.IMREAD_COLOR)
++text=pytesseract.image_to_string(im)
++file.write(text)
++file.close()
++driver.quit()
++
++#with open("Output.txt") as text_file:
++#    text_file.write(text)
+\ No newline at end of file
+diff --git a/Webinar Bot/ToDo.txt b/Webinar Bot/ToDo.txt
+deleted file mode 100644
+index 7921ae8..0000000
+--- a/Webinar Bot/ToDo.txt	
++++ /dev/null
+@@ -1,5 +0,0 @@
+-Gone through the webinars webpages of the competitors.
+--Installed tesseract and chromewebdrivers.
+--Before getting OCR, it is required to get the desired portion of webinar section.
+--To get the text based on different sections, gone through contours in image processing.
+--To do- To go through other techniques for segmentation of webpages for text and provide a architectural flow of implementation
+\ No newline at end of file
+diff --git a/Webinar Bot/Webinar_UI.pptx b/Webinar Bot/Webinar_UI.pptx
+new file mode 100644
+index 0000000..0f0cb00
+Binary files /dev/null and b/Webinar Bot/Webinar_UI.pptx differ
